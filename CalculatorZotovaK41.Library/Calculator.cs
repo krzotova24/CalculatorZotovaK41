@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Data;
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace CalculatorZotovaK41.Library
 {
@@ -8,44 +9,69 @@ namespace CalculatorZotovaK41.Library
     {
         public double Compute(string expression)
         {
-            // Проверка на деление на ноль
-            if (expression.Contains("/0"))
+            if (string.IsNullOrWhiteSpace(expression))
+            {
+                throw new ArgumentException("Пустое выражение");
+            }
+
+            // Убираем пробелы для надежности
+            string cleanExpression = expression.Replace(" ", "");
+
+            // Проверка на явное деление на ноль
+            if (cleanExpression.Contains("/0") && !cleanExpression.Contains("/0."))
             {
                 throw new DivideByZeroException("Деление на ноль невозможно");
             }
 
-            // Обработка степени (если есть ^)
-            if (expression.Contains("^"))
+            // Обработка степеней (поддерживает сложные выражения, точки и запятые)
+            if (cleanExpression.Contains("^"))
             {
-                return EvaluatePower(expression);
+                cleanExpression = ProcessPowers(cleanExpression);
             }
 
-            // Для операций +, -, *, / заменяем точку на запятую для DataTable
-            string expressionForTable = expression.Replace('.', ',');
+            // ВАЖНО: Передаем выражение в DataTable КАК ЕСТЬ (с точкой), 
+            // так как DataTable не понимает запятые как десятичный разделитель.
             var table = new DataTable();
-            var result = table.Compute(expressionForTable, "");
-            return Convert.ToDouble(result);
+
+            try
+            {
+                var result = table.Compute(cleanExpression, "");
+                return Convert.ToDouble(result);
+            }
+            catch (DivideByZeroException)
+            {
+                throw new DivideByZeroException("Деление на ноль невозможно");
+            }
+            catch
+            {
+                throw new Exception("Ошибка вычисления выражения");
+            }
         }
 
-        private double EvaluatePower(string expression)
+        private string ProcessPowers(string expression)
         {
-            // Разделяем выражение по знаку ^
-            string[] parts = expression.Split('^');
+            // Регулярное выражение ищет и точку, и запятую в числах: [.,]
+            Regex regex = new Regex(@"(-?\d+(?:[.,]\d+)?)\^(-?\d+(?:[.,]\d+)?)");
 
-            if (parts.Length != 2)
+            while (regex.IsMatch(expression))
             {
-                throw new ArgumentException("Некорректное выражение со степенью");
+                expression = regex.Replace(expression, match =>
+                {
+                    // Заменяем запятую на точку для правильного парсинга
+                    string baseStr = match.Groups[1].Value.Replace(',', '.');
+                    string expStr = match.Groups[2].Value.Replace(',', '.');
+
+                    double baseValue = double.Parse(baseStr, CultureInfo.InvariantCulture);
+                    double exponent = double.Parse(expStr, CultureInfo.InvariantCulture);
+
+                    double result = Math.Pow(baseValue, exponent);
+
+                    // Возвращаем результат с точкой (для DataTable)
+                    return result.ToString(CultureInfo.InvariantCulture);
+                }, 1);
             }
 
-            // Парсим числа с поддержкой точки как разделителя
-            double baseValue = double.Parse(parts[0], CultureInfo.InvariantCulture);
-            double exponent = double.Parse(parts[1], CultureInfo.InvariantCulture);
-
-            return Math.Pow(baseValue, exponent);
+            return expression;
         }
     }
 }
-
-
-
-
